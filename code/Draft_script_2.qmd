@@ -1,0 +1,928 @@
+---
+title: "Data Science Applied to Ag - Final Project - ML"
+format:
+  html:
+    embed-resources: true
+    toc: true
+    theme: cerulean
+author: Md Shakir Moazzem, Umar Munir
+---
+
+# Start of data wrangling
+
+# Introduction  
+
+This script contains the data wrangling steps for the final project.  
+
+# Setup  
+
+##Loading packages  
+
+The following code chunk will load necessary packages.
+
+```{r Setup, message=F}
+
+# Installing packages
+
+#install.packages("tidyverse")
+#install.packages("readxl")
+#install.packages("janitor")
+#install.packages("dplyr")
+#install.packages("tidyr")
+#install.packages("readr")
+#install.packages("lubridata")
+#install.packages("stringr")
+
+# Loading packages 
+
+library(tidyverse)
+library(readxl) # to read excel files
+library(janitor) # to clean data; helps fix and standardize the column names
+library(dplyr) # wrangling
+library(tidyr) # wrangling
+library(readr) # to export csv
+library(lubridate)
+library(stringr)
+
+```
+
+
+## Reading data  
+
+The following code chunk will read the csv files for the 3 training data sets
+
+```{r training data import, message=F, warning=F}
+
+#reading the csv files for the 3 training data sets 
+
+trait_df <- read_csv("../data/training/training_trait.csv") 
+meta_df  <- read_csv("../data/training/training_meta.csv")
+soil_df  <- read_csv("../data/training/training_soil.csv")
+
+```
+
+## EDA
+
+```{r}
+
+summary(trait_df)
+
+View(trait_df)
+
+```
+```{r}
+
+summary(meta_df)
+
+```
+
+
+
+```{r}
+
+summary(soil_df)
+
+```
+
+
+# Data wrangling on "trait_df"
+
+The code below creates a function to adjust the yield_mg_ha for 15.5% grain moisture.
+
+```{r}
+
+# Function to transform yield to 15.5% moisture
+adjust_yield <- function(yield_mg_ha, grain_moisture) {
+  yield_mg_ha * (100 - grain_moisture) / (100 - 15.5)
+}
+
+```
+
+
+The code below conducts data wrangling on "trait_df"
+
+```{r clean_and_summarize_trait, message=F, warning=F}
+
+
+
+trait_clean <- trait_df %>%
+  select(-block) %>%
+  mutate(
+    site = str_remove_all(site, "[a-z]"), # removing all lowercase letters from site
+    site = str_replace(site, "-.*$", ""), # keeping only text before any dash
+    site = str_replace(site, "_.*$", "") # keeping only text before any underscore
+  ) %>%
+  group_by(year, site, hybrid) %>%
+  summarize(
+    yield_mg_ha    = mean(yield_mg_ha, na.rm = TRUE),
+    grain_moisture = mean(grain_moisture, na.rm = TRUE),
+    date_planted   = first(date_planted),
+    date_harvested = first(date_harvested),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    adjusted_yield = adjust_yield(yield_mg_ha, grain_moisture),
+    planting_date  = as.Date(date_planted,   "%m/%j/%y"),
+    harvest_date   = as.Date(date_harvested, "%m/%j/%y"),
+    plant_doy      = yday(planting_date),
+    harvest_doy    = yday(harvest_date),
+  ) %>%
+  select(-yield_mg_ha, -grain_moisture, -date_planted, -date_harvested, -planting_date, -harvest_date) %>%
+  ungroup()
+
+
+trait_clean
+
+```
+
+
+
+```{r exporting wrangled data set}
+
+#write_csv(trait_avg_df,
+          #"../data/training_trait_clean.csv")
+```
+
+
+# Data wrangling on "soil_df"
+
+The following code chunk will conduct data wrangling on  "training_soil.csv"
+
+
+```{r data_wrangling_training_soil, message=F, warning=F}
+
+soil_clean <- soil_df %>%
+  mutate(
+    # 1) remove all lowercase letters
+    site = str_remove_all(site, "[a-z]"),
+    # 2) keep only text before any dash
+    site = str_replace(site, "-.*$", ""),
+    # 3) keep only text before any underscore
+    site = str_replace(site, "_.*$", "")
+  ) %>%
+  ungroup()
+
+soil_clean
+```
+
+
+```{r exporting wrangled data set}
+
+#write_csv(soil_clean,
+          #"../data/training_soil_clean.csv")
+```
+
+
+# Data wrangling on "meta_df"
+
+The following code chunk will conduct data wrangling on  "training_meta.csv".
+
+```{r clean_meta_sites}
+
+meta_df2 <- meta_df %>%
+  rename(
+    lon = longitude,
+    lat = latitude
+  ) %>%
+  mutate(
+    # 1) remove all lowercase letters
+    site = str_remove_all(site, "[a-z]"),
+    # 2) keep only text before any dash
+    site = str_replace(site, "-.*$", ""),
+    # 3) keep only text before any underscore
+    site = str_replace(site, "_.*$", "")
+  ) %>%
+  distinct(year, site, .keep_all = TRUE) %>%
+  ungroup()
+
+meta_df2
+
+```
+
+
+The code below will create categories for previous crops.
+
+
+```{r}
+
+meta_clean <- meta_df2 %>%
+  mutate(
+    # 1) lowercase & trim
+    prev_crop_raw = str_to_lower(str_squish(previous_crop)),
+    # 2) recode into your desired levels
+    prev_crop = case_when(
+      prev_crop_raw == "cotton"                                   ~ "cotton",
+      prev_crop_raw == "peanut"                                   ~ "peanut",
+      prev_crop_raw %in% c("soybean", "soybeans")                 ~ "soybean",
+      prev_crop_raw == "sorghum"                                  ~ "sorghum",
+      prev_crop_raw %in% c("wheat", "winter wheat", "2019/20 wheat") ~ "wheat",
+      TRUE                                                         ~ "others"
+    ) %>%
+    # 3) make it a factor with the exact ordering you want
+    factor(levels = c("cotton", "peanut", "soybean", "sorghum", "wheat", "others"))
+  ) %>%
+  select(-previous_crop, -prev_crop_raw) %>%
+  clean_names()
+
+meta_clean
+
+```
+
+
+# EDA for cleaned data
+
+
+```{r}
+summary(trait_clean)
+```
+```{r}
+summary(soil_clean)
+```
+
+
+```{r}
+summary(meta_clean)
+```
+
+
+```{r exporting wrangled data set}
+
+#write_csv(meta_clean,
+          #"../data/training_meta_clean.csv")
+```
+
+
+# Merging all 3 cleaned data frames
+
+
+```{r}
+
+merged_clean  <- trait_clean %>%
+  left_join(soil_clean, by = c("year", "site")) %>%
+  left_join(meta_clean, by = c("year", "site"))
+
+merged_clean
+```
+
+```{r}
+summary(merged_clean)
+```
+
+
+```{r exporting merged data set}
+
+#write_csv(merged_clean,
+          #"../data/training_merged_clean.csv")
+```
+
+# End of Data Wrangling 
+
+#Start of Open Source Daymet weather data download
+
+The following code chunk will load necessary packages.  
+
+```{r Setup, message=F, warning=F}
+
+# Installing packages
+
+#install.packages("tidyverse")
+#install.packages("sf") #to manipulate vector geospatial files
+#install.packages("daymetr") #to retrieve data from daymet database website through R
+#install.packages("remotes") #to install R packages that are not available on CRAN, and available on GitHub
+#remotes::install_github("ropensci/USAboundaries") 
+#remotes::install_github("ropensci/USAboundariesData")
+
+# Loading packages
+
+library(tidyverse) #need to load "tidyverse" package at first
+library(sf) # for US map #to manipulate vector geo-spatial points
+library(daymetr) #to retrieve data from daymet database website through R
+library(remotes)
+library(USAboundaries) # for US state boundaries
+library(USAboundariesData)
+
+```
+
+
+The following code chunk will create a map of the USA and plot the sites in the map based on their latitude and longitude.
+
+
+```{r create map of USA and add points, message=F, warning=F}
+
+states <- us_states() %>% 
+  filter( !(state_abbr %in% c("PR", "AK", "HI")) ) #to remove "PR" (Puerto Rico), "AK" (Alaska), and "HI" (Hawaii)
+  
+ggplot() +
+  geom_sf(data = states) + #"geom_sf()" is used to plot "sf" object, which we just created above as "states" object; plots all states and territories of USA
+  geom_point(data = merged_clean,
+             aes(x = lon, #"Longitude" goes on longitude
+                 y = lat) #"Latitude" goes on latitude
+             ) +
+  labs(
+    title = "Corn Trial Site Locations (2014–2023)",
+    x     = "Longitude",
+    y     = "Latitude"
+  )
+
+```
+
+The following code chunk will keep the observations for site-years having latitude and longitude withing the Daymet range of co-ordinates.
+
+
+```{r}
+
+# Define Daymet bounding box (WGS-84)
+min_lat <- 14.53
+max_lat <- 52.00
+min_lon <- -131.104
+max_lon <- -52.95
+
+# Filter merged to Daymet’s valid range, dropping any NA coords
+merged_daymet <- merged_clean %>%
+  filter(
+    !is.na(lat),
+    !is.na(lon),
+    lat  >= min_lat,
+    lat  <= max_lat,
+    lon  >= min_lon,
+    lon  <= max_lon
+  )
+
+# Report how many rows remain (and were dropped)
+message("Rows kept: ", nrow(merged_daymet), 
+        " (dropped: ", nrow(merged_clean) - nrow(merged_daymet), ")")
+
+
+```
+The following code chunk will extract unique combinations of year, site, and their coordinates.
+
+```{r unique_site_years_with_coords}
+
+site_year_df <- merged_daymet %>%
+  select(year, site, lon, lat) %>%  # need to include longitude and latitude along with site-years
+  distinct() %>%                    
+  arrange(year, site)
+
+site_year_df
+
+```
+
+The following code chunk will download the weather data for all unique combinations of year, site, and their coordinates in the "site_year_df" object.
+
+```{r}
+
+weather_daymet_all <- site_year_df %>% 
+  mutate(weather = pmap(list(.y = year, 
+                             .site = site, 
+                             .lat = lat, 
+                             .lon = lon), 
+                        function(.y, .site, .lat, .lon) 
+                          download_daymet( 
+                            site = .site, 
+                            lat = .lat, #specifying ".lat" placeholder for "lat = " argument
+                            lon = .lon, #specifying ".lon" placeholder for "lon = " argument
+                            start = .y, 
+                            end = .y, 
+                            simplify = T,
+                            silent = T) %>% #end of " download_daymet()" function
+                          rename(.year = year,
+                                 .site = site) 
+                        )) 
+
+
+weather_daymet_all
+
+```
+
+
+The following code chunk will unnest the weather column. 
+
+```{r}
+
+weather_daymet_unnest <- weather_daymet_all %>%
+  select(year, site, weather) %>% 
+  unnest(weather) %>% 
+  pivot_wider(names_from = measurement, 
+              values_from = value) %>% 
+  janitor::clean_names()
+
+weather_daymet_unnest
+
+View(weather_daymet_unnest)
+
+```
+
+
+# Merging the weather data retrieved from Daymet to the "merged_clean" data
+
+The following code chunk will merge the weather data retrieved from Daymet to the "merged_clean" data
+
+```{r merge_weather_with_data}
+
+# Join daily weather onto your cleaned trial data by year & site
+
+daymet_all_unnest <- merged_clean %>%
+  left_join(
+    weather_daymet_unnest,
+    by = c("year", "site")
+  )
+
+fieldweather <- daymet_all_unnest
+
+fieldweather
+
+View(fieldweather)
+
+```
+
+
+## Exporting the merged data
+
+
+```{r}
+
+#write_csv(daymet_all_unnest,
+          #"../data/merged_fieldweatherdata.csv"
+          #)
+
+```
+
+
+# End of retreiving weather data from Daymet 
+
+# Start of feature engineering
+
+## Setup 
+
+```{r}
+
+#install.packages("ggridges")
+
+library(ggridges)
+library(tidyverse)
+
+```
+
+
+
+```{r}
+
+#fieldweather <- read_csv("../data/merged_fieldweatherdata.csv")
+
+#fieldweather
+
+```
+
+The following code chunk will keep desired variables that we will use further and get abbreviated month name based on the date.
+
+```{r}
+
+fe_month <- fieldweather %>%
+  # Selecting needed variables
+  dplyr::select(year, 
+                site, 
+                hybrid, 
+                lon, 
+                lat, 
+                yday, 
+                yield = adjusted_yield, 
+                prev_crop,
+                plant_doy,
+                harvest_doy,
+                soil.ph = soilpH, 
+                soil.om.pct = om_pct, 
+                soil.k.ppm = soilk_ppm, 
+                soil.p.ppm = soilp_ppm, 
+                dayl.s = dayl_s, #to rename variable name from "dayl_s" to dayl.s
+                prcp.mm = prcp_mm_day, #to rename variable name to "prcp.mm"
+                srad.wm2 = srad_w_m_2,#to rename variable name to "srad.wm2"
+                tmax.c = tmax_deg_c, #to rename variable name to "tmax.c"
+                tmin.c = tmin_deg_c,#to rename variable name to "tmin.c"
+                vp.pa = vp_pa #to rename variable name to "vp.pa"
+                ) %>%
+  # Creating a date class variable  
+  mutate(date_chr = paste0(year, "/", yday)) %>% 
+  mutate(date = as.Date(date_chr, "%Y/%j")) %>% 
+  # Extracting month from date  
+  mutate(month = month(date)) %>% 
+  mutate(month_abb = month(date, label = T)) #To get abbreviated month name e.g., Jan, Feb, Mar,...,Dec #month_abb is in "ord" (ordinal) format
+
+fe_month
+```
+
+
+
+The following code chunk will feature engineer planting and harvest stages based on the following cut-offs:
+
+Planting
+•	early: DOY ≤ 120
+•	normal: 121–150
+•	late: > 150
+
+Harvest
+•	early: DOY ≤ 275
+•	normal: 276–305
+•	late: > 305
+
+
+```{r}
+
+fe_month <- fe_month%>%
+  mutate(
+    planting_stages = case_when(
+      plant_doy <= 120                     ~ "early",
+      plant_doy >= 121 & plant_doy <= 150  ~ "normal",
+      plant_doy > 150                      ~ "late"
+    ) %>% 
+      fct_relevel("early","normal","late"),
+    
+    harvest_stages = case_when(
+      harvest_doy <= 275                    ~ "early",
+      harvest_doy >= 276 & harvest_doy <= 305 ~ "normal",
+      harvest_doy > 305                     ~ "late"
+    ) %>% 
+      fct_relevel("early","normal","late")
+  ) %>%
+  select(-plant_doy, -plant_doy)
+
+fe_month
+
+
+```
+
+
+
+
+
+
+The following code chunk will summarize daily weather variables based on month.  
+
+```{r fe_month_sum}
+
+fe_month_sum <- fe_month %>%
+  group_by(year, site, hybrid, lon, lat, month_abb, yield, prev_crop, planting_stages, harvest_stages) %>% #If we do a summarise() after group_by(), any column that's not in the group_by() is gone, so we need to include "strength_gtex" in the group_by() to include it in the data frame because "strength_gtex" is our response variable so we must keep it in the data frame 
+  #Because we are gonna be applying a "summarize()" function to different columns, we are gonna use a function called "across()" 
+  summarise(across(.cols = c(soil.ph, 
+                             soil.om.pct, 
+                             soil.k.ppm, 
+                             soil.p.ppm,
+                             dayl.s,
+                             srad.wm2,
+                             tmax.c,
+                             tmin.c,
+                             vp.pa),
+                   .fns = mean, #do not indicate the actual function "mean()", just use the word "mean"
+                   .names = "mean_{.col}"), #specifying the weather variables that we want their mean as new column variables #1st across() is applying the "mean" function (to summarize "mean")
+            across(.cols = prcp.mm,
+                   .fns = sum,
+                   .names = "sum_{.col}"
+                   ) #specifying the weather variable (prcp.mm) that we want its sum as new column variable #2nd across() is summarizing sum #2nd across() is applying the "sum" function (to summarize "sum")
+            ) %>%
+  ungroup() #To convert from "group" to "tibble"
+
+
+fe_month_sum
+
+```
+
+
+The following code chunk will check "tmax.c" and "prcp.mm" for the first site-year and month for the purpose of double checking to make sure that we did everything okay the way we intended. 
+
+```{r}
+
+fe_month %>%
+  filter(year == 2014 & 
+           site == "DEH1" &
+           hybrid == "B37/MO17" &
+           month_abb == "Jan") %>%
+  summarise(tmax.c = mean(tmax.c),
+            prcp.mm = sum(prcp.mm))
+
+
+```
+
+The code below will put the month as part of the column name. 
+
+```{r fe_month_sum_wide}
+
+fe_month_sum_wide <- fe_month_sum %>%
+  pivot_longer(cols = mean_soil.ph:sum_prcp.mm) %>% 
+  mutate(varname = paste0(name, "_", month_abb)) %>% 
+  dplyr::select(-name, -month_abb) %>% 
+  pivot_wider(names_from = varname,
+              values_from = value) %>%
+  # Rounding to one decimal point
+  mutate(across(10:ncol(.), ~round(., 1) )) %>%
+  select(-lon, -lat, -mean_soil.ph_NA, -mean_soil.om.pct_NA, -mean_soil.k.ppm_NA, -mean_soil.p.ppm_NA, -mean_dayl.s_NA, -mean_srad.wm2_NA, -mean_tmax.c_NA, -mean_tmin.c_NA, -mean_vp.pa_NA, -sum_prcp.mm_NA)
+
+
+fe_month_sum_wide  
+
+View(fe_month_sum_wide)
+
+```
+
+
+# EDA round 2  
+Let's make a ridge plot to visualize the distribution of one variable over months.  
+
+```{r, message=FALSE, warning=FALSE}
+
+#install.packages("ggridges")
+library(ggridges) #really powerful package to plot distributions e.g., density plot
+
+ggplot(data = fe_month_sum,
+       aes(x = mean_tmax.c,
+           y = month_abb,
+           fill = stat(x) #fill = stat(x): specific to "ggridges"
+           )
+       ) +
+  geom_density_ridges_gradient(scale = 3,
+                               rel_min_height = 0.01) + #"the 2nd argument is"rel_min_height = 0.01": to cut down the tails of the distribution to look nice
+  scale_fill_viridis_c(option = "C") + #"viridis"scale_fill_viridis_c()": color-blind-friendly color scale #argument (option = "C") to change the color to "magma" because magma is weather related; "option = " varies from A to F
+  theme(legend.position = "none") #"theme(legend.position = "none")": to remove the legend from the graph
+
+```
+
+Now let's do that for all weather variables [ we will automate using map2() to conduct iteration ]
+
+```{r}
+
+finalplots <- fe_month_sum %>%
+  pivot_longer(cols = mean_soil.ph:sum_prcp.mm) %>% #we need to do pivot_longer() to iterate over the weather variables
+  group_by(name) %>%
+  nest() %>% #for iteration, we use "group_by()" followed by "nest()" in combo
+  #we will use map2() since we need to iterate over 2 columns
+  mutate(plot = map2(data, name, #map2() takes 2 arguments: the 1st argument becomes .x, the 2nd argument becomes .y #we must use map2() with a mutate() at first for iteration #"map2(data, name" : we want to iterate over "name" for "data"
+                     ~ ggplot( data = .x, # .x represent "data" in the map2() function, so we need to use data = .x [= "data" from map2() ] to feed the "data" from map2() function as the data of ggplot() #.x is the iterating column of map2() that is a place holder for the 1st argument of map2()
+       aes(x = value,
+           y = month_abb,
+           fill = stat(x)
+           )
+       ) +
+  geom_density_ridges_gradient(scale = 3,
+                               rel_min_height = 0.01) + 
+  scale_fill_viridis_c(option = "C") + 
+  theme(legend.position = "none") +
+  labs(x = .y) #to rename the x-axis as the variable name # .y is the placeholder for "name" (i.e., variable name) in map2() function
+                     )) 
+  
+finalplots
+
+```
+
+
+
+
+```{r}
+
+finalplots$plot #$plot to print all the ggplots for each variables
+
+```
+
+
+```{r}
+
+#write_csv(fe_month_sum_wide,
+          # "../data/weather_monthsum.csv")
+
+```
+
+
+# End of feature engineering
+
+# Start of XGboost
+
+# ML Workflow with XGBoost
+
+## Step 1: Load Libraries
+
+We begin by loading the required libraries:
+
+```{r}
+#| message: false
+#| warning: false
+#install.packages("xgboost") #new pacakage
+library(tidymodels)   # Core framework for modeling (includes recipes, workflows, parsnip, etc.)
+library(finetune)     # Additional tuning strategies (e.g., racing, ANOVA-based tuning)
+library(vip)          # For plotting variable importance from fitted models
+library(xgboost)      # XGBoost implementation in R
+library(ranger)       # Fast implementation of Random Forests
+library(tidyverse)    # Data wrangling and visualization
+library(doParallel)   # For parallel computing (useful during resampling/tuning)
+#library(caret)       # Other great library for Machine Learning 
+```
+
+The following code chunk will rename the "fe_month_sum_wide" data frame as "weather".   
+
+```{r}
+
+weather <- fe_month_sum_wide
+weather
+
+```
+
+# ML workflow
+
+## 1. Pre-processing
+
+```{r weather_split}
+
+set.seed(931735) # Setting seed to get reproducible results 
+
+weather_split <- initial_split(
+  weather, 
+  prop = .7, # proption of split same as previous codes
+  strata = yield  # Stratify by target variable
+  )
+
+weather_split
+
+```
+
+### a. Data split
+
+For data split, let's use **70% training / 30% testing**.
+
+```{r weather_train}
+
+weather_train <- training(weather_split)  # 70% of data
+
+weather_train #This is your traing data frame
+
+```
+
+
+```{r weather_test}
+
+weather_test <- testing(weather_split)    # 30% of data
+
+weather_test
+
+```
+
+
+### b. Distribution of target variable
+
+```{r distribution}
+ggplot() +
+  geom_density(data = weather_train, 
+               aes(x = yield),
+               color = "red") +
+  geom_density(data = weather_test, 
+               aes(x = yield),
+               color = "blue") 
+  
+```
+
+### c. Data processing with recipe
+
+
+Creating a recipe is an easy way to port your processing steps for other data sets without needing to repeat code, and also only considering the data it is being applied to.
+
+You can find all available recipe step options here: https://tidymodels.github.io/recipes/reference/index.html
+
+Different model types require different processing steps.\
+Let's check what steps are required for an elastic net model (linear_reg). We can search for that in this link: https://www.tmwr.org/pre-proc-table #Don't need for numeric data
+
+
+```{r weather_recipe}
+
+# Create recipe for data preprocessing
+weather_recipe <- recipe(yield ~ ., data = weather_train) %>% # Remove identifier columns and months not in growing season
+  step_rm(
+    year,       # Remove year identifier
+    site,       # Remove site identifier
+    matches("Jan|Feb|Mar|Dec")  # Remove non-growing season months
+  ) %>%
+  # Turning every factor (prev_crop, planting_stages, harvest_stages, etc.) into dummies
+  step_dummy(all_nominal_predictors()) %>%
+  # Imputation for any numeric NAs   
+  step_impute_median(all_numeric_predictors())
+
+weather_recipe
+
+```
+
+```{r weather_prep}
+# Prep the recipe to estimate any required statistics
+weather_prep <- weather_recipe %>% 
+  prep()
+
+# Examine preprocessing steps
+weather_prep
+```
+## 2. Training
+
+### a. Model specification
+
+First, let's specify:\
+- the **type of model** we want to train\
+- which **engine** we want to use\
+- which **mode** we want to use
+
+> Elastic nets can only be run for a numerical response variable. XgBoost can be run with either numerical (regression) or categorical (classification) explanatory variable. Therefore, we have the need to specify the mode here.
+
+XgBoost **hyperparameters**:
+
+-   **`trees`**: The number of boosting rounds (i.e., how many trees will be added sequentially).\
+-   **`tree_depth`**: Controls how deep each individual tree can grow. Deeper trees can capture more complex interactions but also increase the risk of overfitting.\
+-   **`min_n`**: Minimum number of observations required in a node for it to be split. Acts as a regularization tool to prevent overly specific splits.\
+-   **`learn_rate`**: Also known as `eta`, it controls how much each additional tree contributes to the overall model. Smaller values make the model more stable but require more trees.
+
+```{r xgb_spec}
+
+xgb_spec <- boost_tree(
+  trees = tune(),
+  tree_depth = tune(),  # Maximum depth of each tree
+  min_n = tune(),  # Minimum samples required to split a node
+  learn_rate = tune()) %>% #Specifying XgBoost as our model type, asking to tune the hyperparameters
+  set_engine("xgboost") %>% #specify engine 
+  set_mode("regression")  # Set to mode
+   # Total number of boosting iterations
+        
+            
+        # Step size shrinkage for each boosting step
+
+       
+  
+       
+xgb_spec
+
+```
+
+### b. Cross-validation setup
+
+We use 5-fold cross-validation to evaluate model performance during tuning:
+
+```{r}
+
+set.seed(235) #34549
+
+resampling_foldcv <- vfold_cv(weather_train, 
+                              v = 5)
+
+resampling_foldcv
+
+resampling_foldcv$splits[[1]]
+
+```
+### c. Hyperparameter grid with Latin Hypercube Sampling
+
+We use Latin hypercube sampling to generate a diverse grid of hyperparameter combinations:
+
+```{r }
+
+xgb_grid <- grid_latin_hypercube(
+  tree_depth(),
+  min_n(),
+  learn_rate(),
+  trees(),
+  size = 10
+)
+
+xgb_grid
+```
+
+```{r}
+ggplot(data = xgb_grid,
+       aes(x = tree_depth, 
+           y = min_n)) +
+  geom_point(aes(color = factor(learn_rate), #coloring the bubbles based on learn_rate
+                 size = trees), #size of the bubbles are based on the tress
+             alpha = .5,
+             show.legend = FALSE)
+```
+
+## 3. Model Tuning
+
+```{r xgb_grid_result}
+
+#install.packages("doParallel")
+#install.packages("parallel")
+
+library(doParallel)
+library(parallel)
+
+set.seed(76544)
+
+#parallel processing
+registerDoParallel(cores = parallel::detectCores()-1)
+
+xgb_res <- tune_race_anova(object = xgb_spec,
+                      preprocessor = weather_recipe,
+                      resamples = resampling_foldcv,
+                      grid = xgb_grid,
+                      control = control_race(save_pred = TRUE))
+
+stopImplicitCluster()
+
+beepr::beep()
+
+xgb_res$.metrics[[2]]
+
+```
+
+
+
+
