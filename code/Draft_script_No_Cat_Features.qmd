@@ -116,18 +116,12 @@ trait_clean <- trait_df %>%
   summarize(
     yield_mg_ha    = mean(yield_mg_ha, na.rm = TRUE),
     grain_moisture = mean(grain_moisture, na.rm = TRUE),
-    date_planted   = first(date_planted),
-    date_harvested = first(date_harvested),
     .groups = "drop"
   ) %>%
   mutate(
     adjusted_yield = adjust_yield(yield_mg_ha, grain_moisture),
-    planting_date  = as.Date(date_planted,   "%m/%j/%y"),
-    harvest_date   = as.Date(date_harvested, "%m/%j/%y"),
-    plant_doy      = yday(planting_date),
-    harvest_doy    = yday(harvest_date),
   ) %>%
-  select(-yield_mg_ha, -grain_moisture, -date_planted, -date_harvested, -planting_date, -harvest_date) %>%
+  select(-yield_mg_ha, -grain_moisture) %>%
   ungroup()
 
 
@@ -179,7 +173,7 @@ The following code chunk will conduct data wrangling on  "training_meta.csv".
 
 ```{r clean_meta_sites}
 
-meta_df2 <- meta_df %>%
+meta_clean <- meta_df %>%
   rename(
     lon = longitude,
     lat = latitude
@@ -193,40 +187,15 @@ meta_df2 <- meta_df %>%
     site = str_replace(site, "_.*$", "")
   ) %>%
   distinct(year, site, .keep_all = TRUE) %>%
-  ungroup()
-
-meta_df2
-
-```
-
-
-The code below will create categories for previous crops.
-
-
-```{r}
-
-meta_clean <- meta_df2 %>%
-  mutate(
-    # 1) lowercase & trim
-    prev_crop_raw = str_to_lower(str_squish(previous_crop)),
-    # 2) recode into your desired levels
-    prev_crop = case_when(
-      prev_crop_raw == "cotton"                                   ~ "cotton",
-      prev_crop_raw == "peanut"                                   ~ "peanut",
-      prev_crop_raw %in% c("soybean", "soybeans")                 ~ "soybean",
-      prev_crop_raw == "sorghum"                                  ~ "sorghum",
-      prev_crop_raw %in% c("wheat", "winter wheat", "2019/20 wheat") ~ "wheat",
-      TRUE                                                         ~ "others"
-    ) %>%
-    # 3) make it a factor with the exact ordering you want
-    factor(levels = c("cotton", "peanut", "soybean", "sorghum", "wheat", "others"))
-  ) %>%
-  select(-previous_crop, -prev_crop_raw) %>%
-  clean_names()
+  select(-previous_crop) %>%
+  clean_names() %>%
+  ungroup() 
+  
 
 meta_clean
 
 ```
+
 
 
 # EDA for cleaned data
@@ -235,6 +204,8 @@ meta_clean
 ```{r}
 summary(trait_clean)
 ```
+
+
 ```{r}
 summary(soil_clean)
 ```
@@ -488,9 +459,6 @@ fe_month <- fieldweather %>%
                 lat, 
                 yday, 
                 yield = adjusted_yield, 
-                prev_crop,
-                plant_doy,
-                harvest_doy,
                 soil.ph = soilpH, 
                 soil.om.pct = om_pct, 
                 soil.k.ppm = soilk_ppm, 
@@ -514,55 +482,12 @@ fe_month
 
 
 
-The following code chunk will feature engineer planting and harvest stages based on the following cut-offs:
-
-Planting
-•	early: DOY ≤ 120
-•	normal: 121–150
-•	late: > 150
-
-Harvest
-•	early: DOY ≤ 275
-•	normal: 276–305
-•	late: > 305
-
-
-```{r}
-
-fe_month <- fe_month%>%
-  mutate(
-    planting_stages = case_when(
-      plant_doy <= 120                     ~ "early",
-      plant_doy >= 121 & plant_doy <= 150  ~ "normal",
-      plant_doy > 150                      ~ "late"
-    ) %>% 
-      fct_relevel("early","normal","late"),
-    
-    harvest_stages = case_when(
-      harvest_doy <= 275                    ~ "early",
-      harvest_doy >= 276 & harvest_doy <= 305 ~ "normal",
-      harvest_doy > 305                     ~ "late"
-    ) %>% 
-      fct_relevel("early","normal","late")
-  ) %>%
-  select(-plant_doy, -plant_doy)
-
-fe_month
-
-
-```
-
-
-
-
-
-
 The following code chunk will summarize daily weather variables based on month.  
 
 ```{r fe_month_sum}
 
 fe_month_sum <- fe_month %>%
-  group_by(year, site, hybrid, lon, lat, month_abb, yield, prev_crop, planting_stages, harvest_stages) %>% #If we do a summarise() after group_by(), any column that's not in the group_by() is gone, so we need to include "yield" in the group_by() to include it in the data frame because "yield" is our response variable so we must keep it in the data frame 
+  group_by(year, site, hybrid, month_abb, yield) %>% #If we do a summarise() after group_by(), any column that's not in the group_by() is gone, so we need to include "yield" in the group_by() to include it in the data frame because "yield" is our response variable so we must keep it in the data frame 
   #Because we are gonna be applying a "summarize()" function to different columns, we are gonna use a function called "across()" 
   summarise(across(.cols = c(soil.ph, 
                              soil.om.pct, 
@@ -605,6 +530,7 @@ fe_month %>%
 
 The code below will put the month as part of the column name. 
 
+
 ```{r fe_month_sum_wide}
 
 fe_month_sum_wide <- fe_month_sum %>%
@@ -614,13 +540,10 @@ fe_month_sum_wide <- fe_month_sum %>%
   pivot_wider(names_from = varname,
               values_from = value) %>%
   # Rounding to one decimal point
-  mutate(across(10:ncol(.), ~round(., 1) )) %>%
-  select(-lon, -lat, -mean_soil.ph_NA, -mean_soil.om.pct_NA, -mean_soil.k.ppm_NA, -mean_soil.p.ppm_NA, -mean_dayl.s_NA, -mean_srad.wm2_NA, -mean_tmax.c_NA, -mean_tmin.c_NA, -mean_vp.pa_NA, -sum_prcp.mm_NA)
-
+  mutate(across(c(4:ncol(.)), ~round(., 1) )) %>%
+  select( -mean_soil.ph_NA, -mean_soil.om.pct_NA, -mean_soil.k.ppm_NA, -mean_soil.p.ppm_NA, -mean_dayl.s_NA, -mean_srad.wm2_NA, -mean_tmax.c_NA, -mean_tmin.c_NA, -mean_vp.pa_NA, -sum_prcp.mm_NA)
 
 fe_month_sum_wide  
-
-View(fe_month_sum_wide)
 
 ```
 
@@ -685,8 +608,8 @@ finalplots$plot #$plot to print all the ggplots for each variables
 
 ```{r}
 
-#write_csv(fe_month_sum_wide,
-          # "../data/weather_monthsum.csv")
+write_csv(fe_month_sum_wide,
+           "../data/weather_monthsum.csv")
 
 ```
 
@@ -715,6 +638,19 @@ library(ranger)       # Fast implementation of Random Forests
 library(tidyverse)    # Data wrangling and visualization
 library(doParallel)   # For parallel computing (useful during resampling/tuning)
 library(caret)       # Other great library for Machine Learning 
+```
+
+
+
+# Load the data set
+
+
+```{r weather}
+
+#weather <- read_csv("../data/weather_monthsum.csv")
+
+#weather
+
 ```
 
 The following code chunk will rename the "fe_month_sum_wide" data frame as "weather".   
@@ -782,14 +718,6 @@ ggplot() +
 ### c. Data processing with recipe
 
 
-Creating a recipe is an easy way to port your processing steps for other data sets without needing to repeat code, and also only considering the data it is being applied to.
-
-You can find all available recipe step options here: https://tidymodels.github.io/recipes/reference/index.html
-
-Different model types require different processing steps.\
-Let's check what steps are required for an elastic net model (linear_reg). We can search for that in this link: https://www.tmwr.org/pre-proc-table #Don't need for numeric data
-
-
 ```{r weather_recipe}
 
 # Create recipe for data preprocessing
@@ -800,14 +728,13 @@ weather_recipe <- recipe(yield ~ ., data = weather_train) %>%
     site,       # Remove site identifier
     hybrid,     # Remove site identifier
     matches("Jan|Feb|Mar|Dec")  # Remove non-growing season months
-  ) %>%
-  # Turning every factor (prev_crop, planting_stages, harvest_stages, etc.) into dummies
-  step_dummy(all_nominal_predictors())
-  
+  ) 
+
 
 weather_recipe
 
 ```
+
 
 ```{r weather_prep}
 # Prep the recipe to estimate any required statistics
@@ -817,6 +744,7 @@ weather_prep <- weather_recipe %>%
 # Examine preprocessing steps
 weather_prep
 ```
+
 ## 2. Training
 
 ### a. Model specification
@@ -839,9 +767,9 @@ XgBoost **hyperparameters**:
 
 xgb_spec <- boost_tree(
   trees = tune(),
-  tree_depth = tune() # ,  # Maximum depth of each tree
-  #min_n = tune(),  # Minimum samples required to split a node
-  #learn_rate = tune()
+  tree_depth = tune(),  # Maximum depth of each tree
+  min_n = tune(),  # Minimum samples required to split a node
+  learn_rate = tune()
   ) %>% #Specifying XgBoost as our model type, asking to tune the hyperparameters
   set_engine("xgboost") %>% #specify engine 
   set_mode("regression")  # Set to mode
@@ -866,6 +794,7 @@ resampling_foldcv
 resampling_foldcv$splits[[1]]
 
 ```
+
 ### c. Hyperparameter grid with Latin Hypercube Sampling
 
 We use Latin hypercube sampling to generate a diverse grid of hyperparameter combinations:
@@ -875,12 +804,13 @@ We use Latin hypercube sampling to generate a diverse grid of hyperparameter com
 xgb_grid <- grid_latin_hypercube(
   trees(),
   tree_depth(),
-  #min_n(),
-  #learn_rate(),
-  size = 10
+  min_n(),
+  learn_rate(),
+  size = 20
 )
 
 xgb_grid
+
 ```
 
 Note: the following code chunk would not work if "tree_depth" and "learn_rate" were not fine tuned in the "xgb_spec" object.
@@ -908,7 +838,7 @@ library(parallel)
 set.seed(76544)
 
 #parallel processing
-registerDoParallel(cores = parallel::detectCores()-1) #starts parallel processing
+#registerDoParallel(cores = parallel::detectCores()-1) #starts parallel processing
 
 xgb_res <- tune_race_anova(object = xgb_spec,
                       preprocessor = weather_recipe,
@@ -916,7 +846,7 @@ xgb_res <- tune_race_anova(object = xgb_spec,
                       grid = xgb_grid,
                       control = control_race(save_pred = TRUE))
 
-stopImplicitCluster() #ends parallel processing
+#stopImplicitCluster() #ends parallel processing
 
 beepr::beep()
 
@@ -1026,9 +956,9 @@ best_rmse %>%
 ```{r final_spec_fit}
 final_spec <- boost_tree(
   trees = best_r2$trees,           # Number of boosting rounds (trees)
-  tree_depth = best_r2$tree_depth #, # Maximum depth of each tree
-  #min_n = best_r2$min_n,           # Minimum number of samples to split a node
-  #learn_rate = best_r2$learn_rate  # Learning rate (step size shrinkage)
+  tree_depth = best_r2$tree_depth, # Maximum depth of each tree
+  min_n = best_r2$min_n,           # Minimum number of samples to split a node
+  learn_rate = best_r2$learn_rate  # Learning rate (step size shrinkage)
 ) %>%
   set_engine("xgboost") %>%
   set_mode("regression")
@@ -1121,342 +1051,3 @@ final_spec %>%
 
 
 # End of XGboost
-
-# Start of Random Forest
-
-# Setup  
-
-```{r}
-#| message: false
-#| warning: false
-
-#install.packages("ranger") #one of the packages in R that models random forest
-
-library(tidymodels)
-library(tidyverse) #takes a while to load
-library(vip)
-library(ranger)
-library(finetune)
-```
-
-## 2. Random Forest Training 
-
-### a. Random Forest Model specification  
-
-First, let's specify:  
-  - the **type of model** we want to train  
-  - which **engine** we want to use  
-  - which **mode** we want to use  
-
-
-Random forest **hyperparameters**:  
-  - **trees**: number of trees in the forest    
-  - **mtry**: number of random features [or columns] sampled at each node split    
-    - **min_n**: minimum number of data points in a node that are required for the node to be split further  
-    
-[Important note: we are not gonna fine tune "min_n" in this exercise because of time constraint, but we should fine tune "min_n" to do random forest in our own data]
-
-Let's create a model specification that will **fine-tune** the first two for us.
-
-A given model type can be fit with different engines (e.g., through different packages). Here, we'll use the **ranger** engine/package.  
-  
-```{r rf_spec}
-
-rf_spec <- 
-  # Specifying random forest as our model type, asking to tune the hyperparameters
-  rand_forest(trees = tune(),
-              mtry = tune() #both "trees" and "mtry" are model-type level hyperparameters, meaning that we fine tune "trees" and "mtry" inside "rand_forest()"
-              ) %>%
-    # Specify the engine (= package)
-    set_engine("ranger") %>% #specifying "ranger" as the engine/package to run random forest 
-    # Specifying mode  
-    set_mode("regression") #random forest can handle both regression (when y is numerical) and classification (when y is categorical) #Here, we are specifying "set_mode("regression")" because our y variable is numerical [continuous]
-
-rf_spec
-
-```
-
-
-
-### b. Hyper-parameter tuning  
-
-For our iterative search, we need:  
-  - Our model specification (`rf_spec`)  
-  - The recipe (`weather_recipe`)  
-  - Our **resampling strategy** (don't have yet) 
-  
-
-Let's define our resampling strategy below, using a 5-fold cross validation approach:  
-
-```{r resampling_foldcv}
-
-set.seed(34549)
-
-rf_resampling_foldcv <- vfold_cv(weather_train, 
-                              v = 5) #but at least 10 folds are recommended
-
-rf_resampling_foldcv
-rf_resampling_foldcv$splits[[1]]
-rf_resampling_foldcv$splits[[2]]
-
-```
-
-
-
-We will use an iterative search algorithm called **simulated annealing**.  
-
-In the algorithm below, we are asking for 10 iterations.  
-
-```{r rf_grid_result}
-
-set.seed(76544)
-
-rf_grid_result <- tune_sim_anneal(object = rf_spec,
-                     preprocessor = weather_recipe,
-                     resamples = rf_resampling_foldcv,
-                    #param_info = rf_param,
-                    iter = 10 
-                     )
-
-beepr::beep()
-
-rf_grid_result
-rf_grid_result$.metrics[[2]]
-```
-
-
-Let's collect a summary of metrics (across all folds, for each iteration), and plot them.  
-
-First, RMSE (lower is better):
-
-```{r RMSE}
-rf_grid_result %>%
-  collect_metrics() %>%
-  filter(.metric == "rmse") %>%
-  ggplot(aes(x = mtry, 
-             y = trees 
-             )) +
-  geom_path(group = 1) +
-  geom_point(aes(color = mean),
-             size = 3) + 
-  scale_color_viridis_b() +
-  geom_text(aes(label = .iter), nudge_x = .0005) +
-  labs(title = "RMSE")
-```
-
-
-Now, let's look into R2 (higher is better):  
-
-```{r R2}
-
-rf_grid_result %>%
-  collect_metrics() %>%
-  filter(.metric == "rsq") %>%
-  ggplot(aes(x = mtry, 
-             y = trees 
-             )) +
-  geom_path(group = 1) +
-  geom_point(aes(color = mean),
-             size = 3) + 
-  scale_color_viridis_b() +
-  geom_text(aes(label = .iter), nudge_x = .0005) +
-  labs(title = "R2")
-
-```
-
-
-We want to see higher R2 (R2: higher is better).
-
-
-The following code chunk will select the best model based on "percent loss" of the metric.
-
-```{r}
-
-# Based on lowest RMSE
-best_rmse <- rf_grid_result %>%
-  select_by_pct_loss("trees",
-                     metric = "rmse",
-                     limit = 2 #"limit = 2": this is how many percent losses you are accepting, 2% in this case
-                     )
-
-best_rmse
-
-```
-
-
-The following code chunk will select the best model based on greatest "R2"
-
-
-```{r}
-
-# Based on greatest R2
-best_r2 <- rf_grid_result %>%
-  select_by_pct_loss("trees",
-                     metric = "rsq",
-                     limit = 2
-                     )
-
-
-best_r2
-
-```
-
-
-I got the he following results that were different than Dr. Bastos's results (because of the randomness of 2 hyperparameters going on at each tree for a lot of models):
-
-Based on RMSE, we would choose   
-  - mtry = 25 
-  - trees = 443
-
-Based on R2, we would choose   
-  - mtry = 22
-  - trees = 113
-
-Let's use the hyperparameter values that optimized R2 to fit our final model.
-
-```{r final_spec}
-final_spec <- rand_forest(trees = best_r2$trees,
-                          mtry = best_r2$mtry) %>%
-  # Specify the engine
-  set_engine("ranger",
-             importance = "permutation" #"permutation" is how we look into variable importance in random forest
-             ) %>%
-    # Specifying mode  
-  set_mode("regression")
-  
-
-final_spec
-```
-
-
-## 3. Validation  
-
-Now that we determined our best model, let's do our **last fit**.
-
-### What does last fit mean? (Will come in exam)
-
-This means 2 things:  
-  - Training the optimum hyperparameter values on the **entire training set**  
-  - Using it to **predict** on the **test set**  
-
-These 2 steps can be completed in one function, as below:  
-
-```{r final_fit}
-final_fit <- last_fit(final_spec, 
-                weather_recipe,
-                split = weather_split)
-
-final_fit %>%
-  collect_predictions()
-```
-
-
-Metrics on the **test set**:
-
-```{r}
-final_fit %>%
-  collect_metrics()
-```
-
-From the output,
-Fit metrics on the test set:
-rmse = 2.9317445	
-rsq	= 0.1882245	
-
-Metrics on **train set** (for curiosity and compare to test set):  
-```{r}
-# RMSE
-final_spec %>%
-  fit(yield ~ .,
-      data = bake(weather_prep, 
-                  weather_train)) %>%
-  augment(new_data = bake(weather_prep, 
-                          weather_train)) %>% 
-  rmse(yield, .pred) %>%
-  bind_rows(
-    
-    
-    # R2
-    final_spec %>%
-      fit(yield ~ .,
-          data = bake(weather_prep, 
-                      weather_train)) %>%
-      augment(new_data = bake(weather_prep, 
-                              weather_train)) %>% 
-      rsq(yield, .pred)
-    
-  )
-
-```
-
-From the output,
-Fit metrics on the train set:
-rmse = 1.1385078	
-rsq	= 0.9470296	
-
-How does metrics on test compare to metrics on train?  
-
-Fit metrics on the test set:
-rmse = 2.9317445	
-rsq	= 0.1882245	
-
-Fit metrics on the train set:
-rmse = 1.1385078	
-rsq	= 0.9470296	
-
-We see that the R2 is really r-e-a-l-l-y high in the train set (rsq	= 0.9470296), as compared to the R2 of the test set 0.1882245. The RMSE is lower in the train set (rmse = 1.1385078) as compared to the RMSE of the test set (rmse = 2.9317445). [This is the reason why it's okay to report the fit metrics of the train set to understand how well our model is explaining our data, but it is not a good measure of the predictive ability of the model. To understand the predictive ability of the model, we have to look at the fit metrics of the test set. Notice that the R2 of the test set was 0.1882245, whereas the R2 of the train set was 0.9470296 -- which is a very large difference. Hence, *we need to always report the fit metrics of the test set* along with the fit metrics of the train set. ]
-
-Predicted vs. observed plot:  
-```{r}
-final_fit %>%
-  collect_predictions() %>%
-  ggplot(aes(x = yield,
-             y = .pred)) +
-  geom_point() +
-  geom_abline() +
-  geom_smooth(method = "lm") +
-  scale_x_continuous(limits = c(20, 40)) +
-  scale_y_continuous(limits = c(20, 40)) 
-```
-
-
-[**Very important note:**
-To interpret random forest model, we should always expcet to see (1) *perdicted vs. observed plot* and (3) *variable importance plot*, at the least -- these are the 2 things that must be mentioned in a random forest model. 
-]
-
-*Variable importance:* 
-
-[For Random Forest,] The importance metric we are evaluating here is **permutation**. 
-
-In the permutation-based approach, for each tree, the out-of-bag sample is passed down the tree and the prediction accuracy is recorded. [as is]   
-
-Then the values for each variable (one at a time) are randomly permuted and the accuracy is again computed.   
-
-The decrease in accuracy as a result of this randomly shuffling of feature values is averaged over all the trees for each predictor.   
-
-The variables with the **largest average decrease in accuracy** [after being permuted] are [the ones that are] considered **most important**.  
-
-```{r}
-
-final_spec %>%
-  fit(yield ~ .,
-         data = bake(weather_prep, weather)) %>%
-    vi() %>%
-  mutate(
-    Variable = fct_reorder(Variable, 
-                           Importance)
-  ) %>%
-  ggplot(aes(x = Importance, 
-             y = Variable)) +
-  geom_col() +
-  scale_x_continuous(expand = c(0, 0)) +
-  labs(y = NULL)
-    
-```
-
-
-#End of Random Forest
-
-#Start of getting yield prediction (yield_mg_ha) for the unseen data in "testing_submission.csv" file
-
-

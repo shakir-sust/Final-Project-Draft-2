@@ -1,0 +1,346 @@
+---
+title: "Data Science Applied to Ag - Final Project - ML"
+format:
+  html:
+    embed-resources: true
+    toc: true
+    theme: cerulean
+author: Md Shakir Moazzem, Umar Munir
+---
+
+# Start of data wrangling
+
+# Introduction  
+
+This script contains the data wrangling steps for the final project.  
+
+# Setup  
+
+##Loading packages  
+
+The following code chunk will load necessary packages.
+
+```{r Setup, message=F}
+
+# Installing packages
+
+#install.packages("tidyverse")
+#install.packages("readxl")
+#install.packages("janitor")
+#install.packages("dplyr")
+#install.packages("tidyr")
+#install.packages("readr")
+#install.packages("lubridata")
+#install.packages("stringr")
+
+# Loading packages 
+
+library(tidyverse)
+library(readxl) # to read excel files
+library(janitor) # to clean data; helps fix and standardize the column names
+library(dplyr) # wrangling
+library(tidyr) # wrangling
+library(readr) # to export csv
+library(lubridate)
+library(stringr)
+
+```
+
+
+# Setup  
+```{r}
+#| message: false
+#| warning: false
+
+#install.packages("ranger") #one of the packages in R that models random forest
+
+library(tidymodels)
+library(tidyverse) #takes a while to load
+library(vip)
+library(ranger)
+library(finetune)
+```
+
+```{r weather}
+weather <- read_csv("../data/weather_monthsum.csv")
+
+weather
+```
+
+# ML workflow  
+We're going to use the same workflow as we used for elastic net.   
+
+## 1. Pre-processing  
+Here's where we perform **data split** and **data processing**.  
+
+### a. Data split  
+For data split, let's use **70% training / 30% testing**.
+
+```{r weather_split}
+# Setting seed to get reproducible results  
+set.seed(931735)
+
+# Setting split level  
+weather_split <- initial_split(weather, 
+                               prop = .7,
+                               strata = strength_gtex) # strata = strength_gtex: to do stratified sampling based on strength_gtex to make sure the distribution of strength across training and testing are similar
+
+weather_split
+```
+
+
+```{r weather_train}
+# Setting train set 
+weather_train <- training(weather_split)
+
+weather_train
+```
+
+```{r weather_test}
+# Setting test split
+weather_test <- testing(weather_split)
+
+weather_test
+```
+
+```{r distribution}
+ggplot() +
+  geom_density(data = weather_train, 
+               aes(x = strength_gtex),
+               color = "red") +
+  geom_density(data = weather_test, 
+               aes(x = strength_gtex),
+               color = "blue") 
+  
+```
+
+```{r weather_recipe}
+weather_recipe <-
+  # Defining predicted and predictor variables
+  recipe(strength_gtex ~ .,
+         data = weather_train) %>%
+  # Removing year and site  
+    step_rm(year, site, matches("Jan|Feb|Mar|Apr|Nov|Dec")) #%>%
+  # Normalizing all numeric variables except predicted variable
+  #step_normalize(all_numeric(), -all_outcomes())
+
+weather_recipe
+```
+
+```{r weather_prep}
+weather_prep <- weather_recipe %>%
+  prep()
+
+weather_prep
+```
+
+
+A given model type can be fit with different engines (e.g., through different packages). Here, we'll use the **ranger** engine/package.  
+  
+```{r rf_spec}
+
+rf_spec <- 
+  # Specifying random forest as our model type, asking to tune the hyperparameters
+  rand_forest(trees = tune(),
+              mtry = tune() #both "trees" and "mtry" are model-type level hyperparameters, meaning that we fine tune "trees" and "mtry" inside "rand_forest()"
+              ) %>%
+    # Specify the engine (= package)
+    set_engine("ranger") %>% #specifying "ranger" as the engine/package to run random forest 
+    # Specifying mode  
+    set_mode("regression") #random forest can handle both regression (when y is numerical) and classification (when y is categorical) #Here, we are specifying "set_mode("regression")" because our y variable is numerical [continuous]
+
+rf_spec
+
+```
+
+### b. Hyper-parameter tuning  
+For our iterative search, we need:  
+  - Our model specification (`rf_spec`)  
+  - The recipe (`weather_recipe`)  
+  - Our **resampling strategy** (don't have yet) 
+  
+
+> Notice that for "random forest", we do not need to specify the parameter information, as we needed for CIT. The reason is that for random forest, all hyperparameters to be tuned are specified at the model level, whereas for CIT: one hyperparameter was at model level ["tree_depth" was fine-tuned inside decision_tree() as:  decision_tree(tree_depth = tune()) ] and another hyperparameter was at the engine level ["conditional_min_criterion" was fine tuned inside set_engine() as: set_engine("partykit", conditional_min_criterion = tune())]. Engine level hyperparameters need to be "finalized" and have their range of values set up before they can be used in search methods.  
+
+[Note: CIT had one hyperparameter at the level of the model, and another hyperparameter at the level of the engine. Because of that, we had to do 1 extra step for the hyperparameter at the level of the engine to set the levels that would be searched in the grid. In random forest, both of the hyperparameters are fine tuned at the level of the model i.e., inside "rand_forest( trees = tune(), mtry = tune() )", and we don't have any hyperparameter at the engine level. Therefore, we can skip one of the steps here in random forest that were required for CIT.] 
+
+> We used 10-fold CV before. It took about 10-min to run the grid on my side, so to avoid a long wait time in class, let's switch to 5-fold CV this time around. But we always need to do at least 10 folds of our data.
+
+Let's define our resampling strategy below, using a 5-fold cross validation approach:  
+```{r resampling_foldcv}
+set.seed(34549)
+resampling_foldcv <- vfold_cv(weather_train, 
+                              v = 5) #but at least 10 folds are recommended
+
+resampling_foldcv
+resampling_foldcv$splits[[1]]
+resampling_foldcv$splits[[2]]
+```
+
+In the algorithm below, we are asking for 50 iterations.  
+
+```{r rf_grid_result}
+set.seed(76544)
+rf_grid_result <- tune_sim_anneal(object = rf_spec,
+                     preprocessor = weather_recipe,
+                     resamples = resampling_foldcv,
+                    #param_info = rf_param,
+                    iter = 10 #we are using "iter = 10" because of time constraint in class #but at least 100 is recommended #"iter = 10" also means that the iteration is gonna run 10 times to find the best #If we specified "iter = 100", the iteration would run 100 times to find the best, running 100 iteration is the best practice
+                     )
+
+beepr::beep() #plays a bell sound when the code chunk finishes running #this comes in handy for a code chunk that takes a long time to run, because the bell sound indicates the code chunk has finished running
+
+rf_grid_result
+rf_grid_result$.metrics[[2]]
+```
+
+First, RMSE (lower is better):
+```{r RMSE}
+rf_grid_result %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  ggplot(aes(x = mtry, 
+             y = trees 
+             )) +
+  geom_path(group = 1) +
+  geom_point(aes(color = mean),
+             size = 3) + 
+  scale_color_viridis_b() +
+  geom_text(aes(label = .iter), nudge_x = .0005) +
+  labs(title = "RMSE")
+```
+
+Now, let's look into R2 (higher is better):  
+
+```{r R2}
+rf_grid_result %>%
+  collect_metrics() %>%
+  filter(.metric == "rsq") %>%
+  ggplot(aes(x = mtry, 
+             y = trees 
+             )) +
+  geom_path(group = 1) +
+  geom_point(aes(color = mean),
+             size = 3) + 
+  scale_color_viridis_b() +
+  geom_text(aes(label = .iter), nudge_x = .0005) +
+  labs(title = "R2")
+
+```
+
+> Previously, we selected the single best model. Now, let's select the best model by "percent loss" of the metric, so we choose a model among the top ones that is more parsimonious.  
+
+```{r}
+# Based on lowest RMSE
+best_rmse <- rf_grid_result %>%
+  select_by_pct_loss("trees",
+                     metric = "rmse",
+                     limit = 2 #"limit = 2": this is how many percent losses you are accepting, 2% in this case
+                     )
+
+best_rmse
+
+```
+
+
+
+```{r}
+# Based on greatest R2
+best_r2 <- rf_grid_result %>%
+  select_by_pct_loss("trees",
+                     metric = "rsq",
+                     limit = 2
+                     )
+
+
+best_r2
+
+```
+
+# 3. Validation  
+
+Now that we determined our best model, let's do our **last fit**.
+
+### What does last fit mean? (Will come in exam)
+
+This means 2 things:  
+  - Training the optimum hyperparameter values on the **entire training set**  
+  - Using it to **predict** on the **test set**  
+
+These 2 steps can be completed in one function, as below:  
+
+```{r final_fit}
+final_fit <- last_fit(final_spec, 
+                weather_recipe,
+                split = weather_split)
+
+final_fit %>%
+  collect_predictions()
+```
+
+Metrics on the **test set**:
+
+```{r}
+final_fit %>%
+  collect_metrics()
+```
+
+Metrics on **train set** (for curiosity and compare to test set):  
+```{r}
+# RMSE
+final_spec %>%
+  fit(strength_gtex ~ .,
+      data = bake(weather_prep, 
+                  weather_train)) %>%
+  augment(new_data = bake(weather_prep, 
+                          weather_train)) %>% 
+  rmse(strength_gtex, .pred) %>%
+  bind_rows(
+    
+    
+    # R2
+    final_spec %>%
+      fit(strength_gtex ~ .,
+          data = bake(weather_prep, 
+                      weather_train)) %>%
+      augment(new_data = bake(weather_prep, 
+                              weather_train)) %>% 
+      rsq(strength_gtex, .pred)
+    
+  )
+
+```
+
+Predicted vs. observed plot:  
+```{r}
+final_fit %>%
+  collect_predictions() %>%
+  ggplot(aes(x = strength_gtex,
+             y = .pred)) +
+  geom_point() +
+  geom_abline() +
+  geom_smooth(method = "lm") +
+  scale_x_continuous(limits = c(20, 40)) +
+  scale_y_continuous(limits = c(20, 40)) 
+```
+
+The variables with the **largest average decrease in accuracy** [after being permuted] are [the ones that are] considered **most important**.  
+
+```{r}
+
+final_spec %>%
+  fit(strength_gtex ~ .,
+         data = bake(weather_prep, weather)) %>%
+    vi() %>%
+  mutate(
+    Variable = fct_reorder(Variable, 
+                           Importance)
+  ) %>%
+  ggplot(aes(x = Importance, 
+             y = Variable)) +
+  geom_col() +
+  scale_x_continuous(expand = c(0, 0)) +
+  labs(y = NULL)
+    
+```
+
