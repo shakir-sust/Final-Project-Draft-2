@@ -1119,21 +1119,21 @@ weather_test <- site_year_test %>%
   select(year, site, weather) %>%
   unnest(weather) %>%
   pivot_wider(names_from = measurement, values_from = value) %>%
-  clean_names()
+  #clean_names()
 
 test_full <- test_base %>%
   left_join(weather_test, by = c("year","site"))
 
 # Feature engineering monthly summaries for 2024 site‐years
 fe_test <- test_full %>%
-  # create date & month
+  # creating date & month
   mutate(date = as.Date(paste0(year, "/", yday), "%Y/%j"),
          month_abb = month(date, label = TRUE)) %>%
-  # select and rename to match training
+  # selecting and renaming to match training
   transmute(
     year, site, hybrid,
     month_abb,
-    soil.ph       = soilp_h,    # adjust these names if your clean_names() differ
+    soil.ph       = soilp_h,    # will have to adjust these names if the clean_names() differ
     soil.om.pct   = om_pct,
     soil.k.ppm    = soilk_ppm,
     soil.p.ppm    = soilp_ppm,
