@@ -813,7 +813,7 @@ xgb_grid
 
 ```
 
-Note: the following code chunk would not work if "tree_depth" and "learn_rate" were not fine tuned in the "xgb_spec" object.
+The following code chunk will plot the hyperparameter combinations.
 
 ```{r}
 ggplot(data = xgb_grid,
@@ -826,6 +826,8 @@ ggplot(data = xgb_grid,
 ```
 
 ## 3. Model Tuning
+
+The following code chunk will conduct model tuning.
 
 ```{r xgb_grid_result}
 
@@ -857,9 +859,12 @@ xgb_res$.metrics[[2]]
 
 ## 4. Select Best Models
 
-We select the best models using three strategies (best, within 1 SE, within 2% loss) which we learned in class:
+We select the best models using three strategies (lowest RMSE, highest R2, within 1 SE, within 2% loss).
+
+The following code chunk will select best model based on lowest RMSE.
 
 ```{r}
+
 # Based on lowest RMSE
 best_rmse <- xgb_res %>% 
   select_best(metric = "rmse")%>% 
@@ -869,10 +874,11 @@ best_rmse
 
 ```
 
+The following code chunk will select best model based on lowest RMSE within 1% loss
 
 
 ```{r}
-# Based on lowers RMSE within 1% loss
+# Based on lowest RMSE within 1% loss
 best_rmse_pct_loss <- xgb_res %>% 
   select_by_pct_loss("min_n",
                      metric = "rmse",
@@ -883,6 +889,7 @@ best_rmse_pct_loss <- xgb_res %>%
 best_rmse_pct_loss
 ```
 
+The following code chunk will select best model based on lowest RMSE within 1 SE.
 
 
 ```{r}
@@ -898,7 +905,7 @@ best_rmse_one_std_err
 ```
 
 
-Here we use all three methods which we learn in this class for R2.
+The following code chunk will select best model based on greatest R2.
 
 
 ```{r}
@@ -910,10 +917,11 @@ best_r2 <- xgb_res %>%
 best_r2
 ```
 
+The following code chunk will select best model based on greatest R2 within 1% loss.
 
 
 ```{r}
-# Based on lowers R2 within 1% loss
+# Based on greatest R2 within 1% loss
 best_r2_pct_loss <- xgb_res %>% 
   select_by_pct_loss("min_n",
                      metric = "rsq",
@@ -925,10 +933,11 @@ best_r2_pct_loss
 ```
 
 
+The following code chunk will select best model based on greatest R2 within 1 SE
 
 
 ```{r}
-# Based on lowest R2 within 1 se
+# Based on greatest R2 within 1 se
 best_r2_one_std_error <- xgb_res %>% 
   select_by_one_std_err(metric = "rsq",
                         eval_time = 100,
@@ -941,6 +950,8 @@ best_r2_one_std_error
 
 ## Compare and Finalize Model
 
+The following code chunk will compare all models
+
 ```{r comparing values}
 best_rmse %>% 
   bind_rows(best_rmse_pct_loss, 
@@ -952,6 +963,8 @@ best_rmse %>%
 
 
 ## 5. Final Specification
+
+The following code chunk will conduct final specification.
 
 ```{r final_spec_fit}
 final_spec <- boost_tree(
@@ -972,6 +985,8 @@ final_spec
 
 ## Validation
 
+The following code chunk will conduct validation.
+
 ```{r final_fit}
 set.seed(10)
 final_fit <- last_fit(final_spec,
@@ -985,6 +1000,8 @@ final_fit %>%
 
 ## 7. Evaluate on *Test Set*
 
+The following code chunk will evaluate fit metrics on the test set.
+
 ```{r final_fit_metrics}
 final_fit %>%
   collect_metrics()
@@ -993,6 +1010,8 @@ final_fit %>%
  
 
 ## 8. Evaluate on Training Set
+
+The following code chunk will evaluate fit metrics on the training set.
 
 ```{r}
 final_spec %>%
@@ -1018,6 +1037,8 @@ final_spec %>%
 
 ## 9. Predicted vs Observed Plot
 
+The following code chunk will create a Predicted vs Observed Plot.
+
 ```{r}
 final_fit %>%
   collect_predictions() %>%
@@ -1032,6 +1053,8 @@ final_fit %>%
 
 
 ## 10. Variable Importance
+
+The following code chunk will create a Variable Importance plot.
 
 ```{r final_spec}
 final_spec %>%
@@ -1049,5 +1072,129 @@ final_spec %>%
   labs(y = NULL)
 ```
 
+# Obtaining "yield" prediction on the "testing_submission.csv" data set
 
-# End of XGboost
+```{r}
+
+# Loading libraries 
+library(tidyverse)    # dplyr, purrr, tidyr, readr, stringr, etc.
+library(lubridate)    # dates → yday, month
+library(janitor)      # clean_names()
+library(daymetr)      # download_daymet()
+library(tidymodels)   # recipe(), bake(), fit(), predict()
+# (assumes final_spec and weather_prep already exist in your environment)
+
+# Reading & cleaning testing data 
+
+submission   <- read_csv("../data/testing/testing_submission.csv") %>% 
+  mutate(site = str_remove_all(site, "[a-z]"),
+         site = str_replace(site, "-.*$", ""),
+         site = str_replace(site, "_.*$", ""))
+
+meta_test    <- read_csv("../data/testing/testing_meta.csv")  %>% 
+  rename(lon = longitude, lat = latitude) %>% 
+  mutate(site = str_remove_all(site, "[a-z]"),
+         site = str_replace(site, "-.*$", ""),
+         site = str_replace(site, "_.*$", "")) %>% 
+  distinct(year, site, .keep_all = TRUE) %>% 
+  select(-previous_crop)
+
+soil_test    <- read_csv("../data/testing/testing_soil.csv")  %>% 
+  mutate(site = str_remove_all(site, "[a-z]"),
+         site = str_replace(site, "-.*$", ""),
+         site = str_replace(site, "_.*$", ""))
+
+test_base <- submission %>%
+  left_join(soil_test, by = c("year","site")) %>%
+  left_join(meta_test, by = c("year","site"))
+
+# Downloading Daymet weather for 2024 site‐years 
+site_year_test <- test_base %>% 
+  select(year, site, lon, lat) %>% 
+  distinct()
+
+weather_test <- site_year_test %>%
+  mutate(weather = pmap(
+    list(.y = year, .site = site, .lat = lat, .lon = lon),
+    ~ download_daymet(site = .site,
+                      lat   = .lat,
+                      lon   = .lon,
+                      start = .y,
+                      end   = .y,
+                      simplify = TRUE,
+                      silent = TRUE)
+  )) %>%
+  select(year, site, weather) %>%
+  unnest(weather) %>%
+  pivot_wider(names_from = measurement, values_from = value) %>%
+  clean_names()
+
+test_full <- test_base %>%
+  left_join(weather_test, by = c("year","site"))
+
+# Feature engineering monthly summaries for 2024 site‐years
+fe_test <- test_full %>%
+  # create date & month
+  mutate(date = as.Date(paste0(year, "/", yday), "%Y/%j"),
+         month_abb = month(date, label = TRUE)) %>%
+  # select and rename to match training
+  transmute(
+    year, site, hybrid,
+    month_abb,
+    soil.ph       = soilp_h,    # adjust these names if your clean_names() differ
+    soil.om.pct   = om_pct,
+    soil.k.ppm    = soilk_ppm,
+    soil.p.ppm    = soilp_ppm,
+    dayl.s        = dayl_s,
+    prcp.mm       = prcp_mm_day,
+    srad.wm2      = srad_w_m_2,
+    tmax.c        = tmax_deg_c,
+    tmin.c        = tmin_deg_c,
+    vp.pa         = vp_pa
+  ) %>%
+  group_by(year, site, hybrid, month_abb) %>%
+  summarise(
+    mean_soil.ph     = mean(soil.ph,   na.rm = TRUE),
+    mean_soil.om.pct = mean(soil.om.pct, na.rm = TRUE),
+    mean_soil.k.ppm  = mean(soil.k.ppm,  na.rm = TRUE),
+    mean_soil.p.ppm  = mean(soil.p.ppm,  na.rm = TRUE),
+    mean_dayl.s      = mean(dayl.s,      na.rm = TRUE),
+    sum_prcp.mm      = sum(prcp.mm,      na.rm = TRUE),
+    mean_srad.wm2    = mean(srad.wm2,    na.rm = TRUE),
+    mean_tmax.c      = mean(tmax.c,      na.rm = TRUE),
+    mean_tmin.c      = mean(tmin.c,      na.rm = TRUE),
+    mean_vp.pa       = mean(vp.pa,       na.omit = TRUE)
+  ) %>%
+  ungroup() %>%
+  pivot_longer(
+    cols = starts_with(c("mean_", "sum_")),
+    names_to = "name",
+    values_to = "value"
+  ) %>%
+  mutate(varname = paste0(name, "_", month_abb)) %>%
+  select(-name, -month_abb) %>%
+  pivot_wider(names_from = varname, values_from = value) %>%
+  select(-ends_with("_NA"))
+
+# Prepping test features & prediction 
+test_prepped  <- bake(weather_prep, new_data = fe_test)
+
+# fitting final model on all training data
+final_model   <- final_spec %>% 
+  fit(yield ~ ., data = bake(weather_prep, weather))
+
+# generating predictions
+predictions   <- predict(final_model, new_data = test_prepped)
+
+# binding back 
+submission_pred <- fe_test %>% 
+  select(year, site, hybrid) %>% 
+  bind_cols(predictions)
+
+write_csv(submission_pred,
+          "../data/testing/testing_submission_pred.csv")
+
+
+```
+
+
