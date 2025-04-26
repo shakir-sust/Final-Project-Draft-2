@@ -1168,6 +1168,10 @@ fe_test <- test_full %>%
   pivot_wider(names_from = varname, values_from = value) %>%
   select(-ends_with("_NA"))
 
+# writing into .csv file to directly use in random forest predictions
+write_csv(fe_test,
+          "../data/testing/testing_submission_fe_test.csv")
+
 # Prepping test features & prediction 
 test_prepped  <- bake(weather_prep, new_data = fe_test)
 
