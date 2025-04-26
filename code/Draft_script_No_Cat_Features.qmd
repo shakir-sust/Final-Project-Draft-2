@@ -1076,14 +1076,6 @@ final_spec %>%
 
 ```{r}
 
-# Loading libraries 
-library(tidyverse)    # dplyr, purrr, tidyr, readr, stringr, etc.
-library(lubridate)    # dates → yday, month
-library(janitor)      # clean_names()
-library(daymetr)      # download_daymet()
-library(tidymodels)   # recipe(), bake(), fit(), predict()
-# (assumes final_spec and weather_prep already exist in your environment)
-
 # Reading & cleaning testing data 
 
 submission   <- read_csv("../data/testing/testing_submission.csv") %>% 
